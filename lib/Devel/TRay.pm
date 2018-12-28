@@ -1,42 +1,36 @@
 =head1 NAME
 
-Devel::CallTrace - See what your code's doing
+Devel::TRay - See what your code's doing
 
 =head1 SYNOPSIS
 
-#!/usr/bin/perl -d:CallTrace
+    #!/usr/bin/perl -d:TRay
 
-package foo;
+or
 
-sub bar {
-  print "bar\n";
-  baz();
-}
+    perl -d:TRay script.pl
 
-sub baz {
-    print "boo\n";
-}
+=head1 INSTALLATION
 
+    perl Makefile.PL && sudo make install
 
-foo::bar();
+=head1 DESCRIPTION
 
-=head1 RATIONALE
+Fork of L<Devel::CallTrace> with following additions
 
-There are a number of perl modules in the CPAN that are designed to trace
-a program's execution as it runs. Each uses a different trick to do its job, 
-but none of them quite met my needs.  The technique this module uses is quite 
-simple and seems to be quite robust.  
-
+    Filter output as easy as L<Devel::KYTProf>
+    
+    Ability to not show cpan and CORE module calls
 
 =cut
 
-package Devel::CallTrace;
+package Devel::TRay;
 use warnings;
 use strict;
 no strict 'refs';
 
 use vars qw($SUBS_MATCHING);
-our $VERSION = '1.2';
+our $VERSION = '1.0';
 
 $SUBS_MATCHING = qr/.*/;
 
@@ -73,10 +67,11 @@ $SUBS_MATCHING = qr/.*/;
 BEGIN { $^P |= (0x01 | 0x80 | 0x100 | 0x200); };
 
 sub import {
-    my $self = shift;
-    my $re = shift;
+    my ( $self, $re ) = @_;
 
-    $Devel::CallTrace::SUBS_MATCHING = qr/$re/;
+    if ($re) {
+        $Devel::TRay::SUBS_MATCHING = qr/$re/;
+    }
 }
 
 package DB;
@@ -102,8 +97,8 @@ sub sub {
     local $DB::CALL_DEPTH = $DB::CALL_DEPTH+1;
 
     # Report on what's going on, but only if it matches our regex
-    Devel::CallTrace::called($DB::CALL_DEPTH, \@_) 
-        if ($DB::sub =~ $Devel::CallTrace::SUBS_MATCHING);
+    Devel::TRay::called($DB::CALL_DEPTH, \@_) 
+        if ($DB::sub =~ $Devel::TRay::SUBS_MATCHING);
 
     # Call our subroutine. @_ gets passed on for us.
     # by calling it last, we don't need to worry about "wantarray", etc
@@ -112,7 +107,7 @@ sub sub {
     &{$DB::sub};
 }
 
-=head2 Devel::CallTrace::called 
+=head2 Devel::TRay::called 
 
 This routine is called with two parameters:
 
@@ -132,16 +127,18 @@ To get at the subroutine that was being called, have a look at $DB::sub
 
 =cut
 
-sub Devel::CallTrace::called {
-    my $depth = shift;
-    my $routine = shift;
+sub Devel::TRay::called {
+    my ( $depth, $routine_params ) = @_;
     # print STDERR is safe. warn is not. calling any routine 
     # not defined from within the DB:: package will not work. (see perldebguts)
-    print STDERR " " x $depth . $DB::sub;
-    if (exists $DB::sub{$DB::sub}) {
-        print STDERR " ($DB::sub{$DB::sub})";
+    
+    if ( $DB::sub !~ /CODE/ ) {
+        print STDERR " " x $depth . $DB::sub;
+        if (exists $DB::sub{$DB::sub}) {
+            print STDERR " ($DB::sub{$DB::sub})";  # print file and string number
+        }
+        print STDERR "\n";
     }
-    print STDERR "\n";
 }
 
 =head1 BUGS
