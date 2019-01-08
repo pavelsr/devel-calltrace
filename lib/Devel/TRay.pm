@@ -28,6 +28,7 @@ no strict 'refs';
 
 use vars qw($SUBS_MATCHING);
 our $VERSION = '1.0';
+our $calls = [];
 
 $SUBS_MATCHING = qr/.*/;
 
@@ -54,12 +55,23 @@ sub sub {
 sub Devel::TRay::called {
     my ( $depth, $routine_params ) = @_;
     if ( $DB::sub !~ /CODE/ ) {
-        print STDERR " " x $depth . $DB::sub;
+        my $frame = { 'sub' => "$DB::sub", 'depth' => $depth };
         if (exists $DB::sub{$DB::sub}) {
-            print STDERR " ($DB::sub{$DB::sub})";  # print file and string number
+            $frame->{'line'} = $DB::sub{$DB::sub};
         }
-        print STDERR "\n";
+        push @$calls, $frame;
     }
+}
+
+sub _print {
+    my ( $frame ) = @_;
+    my $str = " " x $frame->{'depth'} . $frame->{'sub'};
+    $str.= " (".$frame->{'line'}.")" if $frame->{'line'};
+    print STDERR "$str\n";
+}
+
+END {
+    _print($_) for @$calls;
 }
 
 1;
