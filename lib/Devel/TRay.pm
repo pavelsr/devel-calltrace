@@ -71,6 +71,10 @@ our $traced_modules = [];
 my $indent = " ";
 my $mcpan = MetaCPAN::Client->new( version => 'v1' );
 
+sub _get_enabled_module_filters {
+    return [ grep { $_ =~ 'hide_' && $Devel::TRay::ARGS->{$_} } sort keys %{$Devel::TRay::ARGS} ];
+}
+
 sub sub {
     local $DB::CALL_DEPTH = $DB::CALL_DEPTH+1;
     Devel::TRay::called($DB::CALL_DEPTH, \@_) 
@@ -81,7 +85,7 @@ sub sub {
 
 sub Devel::TRay::called {
     my ( $depth, $routine_params ) = @_;
-    my $frame = { 'sub' => "$DB::sub", 'package' => $DB::package, 'depth' => $depth };
+    my $frame = { 'sub' => "$DB::sub", 'depth' => $depth };
     if (exists $DB::sub{$DB::sub}) {
         $frame->{'line'} = $DB::sub{$DB::sub};
     }
@@ -97,28 +101,57 @@ sub _extract_module_name {
     return join( '::', @x );
 }
 
-sub _get_enabled_module_filters {
-    return [ grep { $_ =~ 'hide_' && $Devel::TRay::ARGS->{$_} } sort keys %{$Devel::TRay::ARGS} ];
-}
+# $severity - вариант проверки. 
+# 0 или undef - проверить только через $mcpan->module()
+# 1 - проверить что есть именно такой дистрибутив $mcpan->distribution()
+# 2 - есть именно такой модуль, входящий в состав дистрибутива с одинаковым верхним namespace
+# Например, модуль Foo::Bar при котором есть либо дистрибутив Foo::Bar, либо этот модуль входит в состав
+# дистрибутива Foo
 
 sub _is_cpan_published {
-    my ($pkg) = @_;
+    my ($pkg, $severity) = @_;
     return 0 if !defined $pkg;
+	$severity = 2 if !defined $severity;
     
-    my $expected_distro = $pkg;
-    $expected_distro =~ s/::/-/;
+	if ( $severity == 0 ) {
+		eval {
+			return $mcpan->module($pkg)->distribution;
+		} or do {
+			return 0;
+		}
+	}
+	
+	elsif ( $severity == 1 ) {
+	    my $expected_distro = $pkg;
+	    $expected_distro =~ s/::/-/;
+		eval {
+			return $mcpan->distribution($expected_distro)->name;
+		} or do {
+			return 0;
+		}
+	}
+	
+	elsif ( $severity == 2 ) {
+	    my $expected_distro = $pkg;
+	    $expected_distro =~ s/::/-/;
+		eval {
+			$mcpan->distribution($expected_distro);
+			return 1;
+		};
+		
+		$expected_distro = _extract_module_name($pkg); # e.g. Foo::Bar
+		my $real_distro;
+		eval {
+			$real_distro = $mcpan->module($expected_distro)->distribution; # e.g. Foo
+			return 1 if ( $expected_distro =~ qr/$real_distro/ );
+		};
+		
+		return 0;
+	}
     
-    eval {
-        my $distro = $mcpan->distribution($expected_distro)->name;
-        return 1;
-    } or do {
-        eval {
-            my $distro = $mcpan->module($pkg)->distribution;    
-            return 1 if ( $expected_distro =~ qr/$distro/ );
-        } or do {
-            return 0;
-        }
-    }
+	else {
+		die "Wrong or non implemented severity value";
+	}
 }
 
 sub _is_core {
@@ -143,14 +176,17 @@ sub _check_filter {
         'hide_core' => \&_is_core,
         'hide_eval' => \&_is_eval
     );
-    return $actions{$option}->($pkg);
+	my $res = $actions{$option}->($pkg);
+	# print STDERR "$option\t$pkg\t$res\n";
+    return $res;
 }
 
 # return 1 if module calls must be leaved in stacktrace
 sub _leave_in_trace {
     my ( $module, $filters ) = @_;
-    
-    $filters = _get_enabled_module_filters() if !defined $filters;
+	
+	die "No filters specified" if !defined $filters;
+	
     for my $f (@$filters) {
         return 0 if ( _check_filter( $f, $module ) );
     }
@@ -163,14 +199,21 @@ sub _filter_calls {
 	@$calls = grep { $_->{'sub'} !~ /CODE/ } @$calls;
 	
 	my $subs = [ map { $_->{'sub'} } @$calls ];
-	my $traced_modules = [ uniq map { _extract_module_name($_) } @$subs ];
+	$traced_modules = [ uniq map { _extract_module_name($_) } @$subs ];
 
 	@$traced_modules = grep { $_ ne 'Devel::TRay' } @$traced_modules;
-    @$traced_modules = grep { _leave_in_trace($_) } @$traced_modules;
-    my %modules_left = map { $_ => 1 } @$traced_modules;
+	# warn "B : ".Dumper $traced_modules;
+	##### PROBLEM STRING IS NEXT
+	
+	my $filters = _get_enabled_module_filters();
+	warn Dumper "Enabled filters: ".Dumper $filters;
+    @$traced_modules = grep { _leave_in_trace($_, $filters) } @$traced_modules;
+    warn "B : ".Dumper $traced_modules;
+	
+	my %modules_left = map { $_ => 1 } @$traced_modules;
     @$calls = grep { $modules_left{_extract_module_name($_->{'sub'})} } @$calls;
     
-    return $traced_modules;
+    return { 'calls' => $calls, 'traced' => $traced_modules };
 }
 
 sub _print {
@@ -181,16 +224,12 @@ sub _print {
 }
 
 END {
-    # warn Dumper $calls;
-	
-	$DB::traced_modules = _filter_calls($calls);
-	
-	# _filter_calls($calls, $traced_modules);
-	
-    # _filter_calls($calls);
+
+	# warn Dumper $calls;
+	_filter_calls($calls);
 	# warn Dumper $calls;
     # _print($_) for @$calls;
-    warn "Traced modules: ".Dumper $DB::traced_modules;
+    warn "Traced modules: ".Dumper $traced_modules;
 }
 
 1;
