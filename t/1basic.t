@@ -1,48 +1,85 @@
-#!/usr/bin/perl
+use Test::More;
+use Capture::Tiny ':all';
+use Data::Dumper;
 
-# I can't make this go with Test::More because we're hooking the symbol table
-use vars qw/@CALLED/;
-use Devel::CallTrace;
-
-package DB;
-sub Devel::CallTrace::called {
-    my @args = ($_[0], $DB::sub, $_[1]);
-    push @main::CALLED, \@args;
-}
-package main;
-
-
-sub bar {
-  baz();
-}
-sub baz {
-1;
+BEGIN {
+    use_ok( 'Devel::TRay' );
+    use_ok( 'DB' );
 }
 
-my $return = bar();
+subtest "Devel::TRay::_get_enabled_module_filters" => sub {
+    # _get_enabled_module_filters must return only values which
+    # 1) starts from _hide
+    # 2) are true
+    
+    use_ok( 'Devel::TRay', 'subs_matching=X:hide_core=1:hide_abc=1:hide_xyz=0' );
 
-package DB;
+    is_deeply ( 
+        DB::_get_enabled_module_filters(),
+        [ 'hide_abc', 'hide_core' ],   
+        );
+        
+    use_ok( 'Devel::TRay', 'xyz=1:abc=0:foo=bar' );
+    is_deeply ( DB::_get_enabled_module_filters(), [] );
+};
 
-eval "sub DB::sub  {&\$DB::sub};";
 
-package main;
+subtest "DB::_extract_module_name" => sub {
+    ok( 'Data::Dumper' eq  DB::_extract_module_name('Data::Dumper::Dump'), 'Data::Dumper::Dump' );
+    ok( 'Module::Load' eq  DB::_extract_module_name('Module::Load::_load'), "Sub name starts from _" );
+    ok( '(eval)' eq  DB::_extract_module_name('(eval)'), "Sub name without :: " );
+};
 
 
-unless( scalar @CALLED == 2 ) { print "not "};
-print "ok 1 - There were two calls\n";
-unless ($return ==1) { print "not "};
-print "ok 2\n";
+# data for testing, list of modules
+my $m = {
+    cpan => [ 'CPAN', 'Module::Load',  'Module::CoreList', 'Data::Dumper', 'File::Slurper', 'Moose' ],
+    core => [ 'CPAN', 'Module::Load',  'Module::CoreList' ],
+    other => [ 'CCXX::Debug', 'XPortal', 'ABC' ]
+};
 
-my $first = shift @CALLED;
-unless ($first->[0] == '1') { print "not "};
-print "ok 3 - Started with a depth of 1 - ".$first->[0]."\n";
-unless ($first->[1] eq 'main::bar') { print "not "};
-print "ok 4 - bar was called first: ".$first->[1]."\n";
+subtest "DB::_is_cpan_published" => sub {
+    ok DB::_is_cpan_published ( $m->{cpan}[0] ), $m->{cpan}[0].' is published on CPAN';
+    ok ! DB::_is_cpan_published ( $m->{other}[0] ), $m->{other}[0].' is NOT published on CPAN';
+};
 
-my $second = shift @CALLED;
-unless ($second->[0] == '2') { print "not "};
-print "ok 5 - Started with a depth of 2 ".$second->[0]."\n";
-unless ($second->[1] eq 'main::baz') { print "not "};
-print "ok 6 - baz was called second ".$second->[1]."\n";
-print "1..6\n";
-1;
+subtest "DB::_is_core" => sub {
+    ok DB::_is_core( $m->{core}[0] ), $m->{core}[0].' is core module';
+    ok !DB::_is_core( $m->{other}[0] ), $m->{other}[0].' is not core module';
+};
+
+subtest "DB::_is_eval" => sub {
+    ok DB::_is_eval('(eval)');
+    ok !DB::_is_eval('Data::Dumper::Dump');
+};
+
+subtest _check_filter => sub {
+    ok DB::_check_filter( 'hide_core', $m->{core}[0] );      
+    ok !DB::_check_filter( 'hide_core', $m->{other}[0] );
+
+    ok DB::_check_filter( 'hide_cpan', $m->{cpan}[0] );
+    ok !DB::_check_filter( 'hide_cpan', $m->{other}[0] );  
+
+    ok DB::_check_filter( 'hide_eval', '(eval)' );
+    ok !DB::_check_filter( 'hide_eval', $m->{other}[0] );  
+};
+
+# subtest _leave_in_trace => sub {
+#     # test on default behaviour
+#     ok !DB::_leave_in_trace( $m->{cpan}[3] );
+#     ok !DB::_leave_in_trace( $m->{core}[0] );
+#     ok !DB::_leave_in_trace( '(eval)' );
+#     ok DB::_leave_in_trace( $m->{other}[0] );
+# };
+
+subtest "main" => sub {
+	use_ok( 'Devel::TRay', 'hide_core=1:hide_cpan=1:hide_eval=1' );
+    my $stderr = capture_stderr {
+        system( 'perl -d:TRay t/test.pl' );
+    };
+	warn Dumper $stderr;
+    # is $stderr, "main::foo\nmain::bar"
+	ok 1;
+};
+
+done_testing();
