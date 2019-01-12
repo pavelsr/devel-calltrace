@@ -9,20 +9,34 @@ Devel::TRay - See what your code's doing
 or
 
     perl -d:TRay script.pl
-    
-=head1 FILTERS
-
-    -d:TRay=subs_matching=X:no_core=1
-
-import options are separated with ':' symbol
-
+	
 =head1 DESCRIPTION
 
 Fork of L<Devel::CallTrace> with following additions
 
-    Filter output as easy as L<Devel::KYTProf>
+=over
+
+=item *
+
+Filter output as easy as L<Devel::KYTProf>
+	   
+=item *
+	    
+Ability to not show public and CORE module calls
+
+=back
+
+See module tests for more details.
     
-    Ability to not show cpan and CORE module calls
+=head1 FILTERS USAGE
+
+You can use multiple filters with syntax like
+
+    -d:TRay=subs_matching=X:hide_core=1:hide_cpan=1:hide_eval=1:show_lines=0
+
+( import options are separated with ':' symbol )
+
+=head1 AVAILABLE OPTIONS
 
 =cut
 
@@ -68,7 +82,7 @@ use Module::CoreList;
 sub DB{};
 our $CALL_DEPTH = 0;
 our $traced_modules = [];
-my $indent = " ";
+my $indent = $Devel::TRay::ARGS->{indent} || "  ";
 my $mcpan = MetaCPAN::Client->new( version => 'v1' );
 
 sub _get_enabled_module_filters {
@@ -100,14 +114,6 @@ sub _extract_module_name {
     pop @x;
     return join( '::', @x );
 }
-
-# $severity - вариант проверки. 
-# 0 или undef - проверить только через $mcpan->module()
-# 1 - проверить что есть именно такой дистрибутив $mcpan->distribution()
-# 2 - есть именно такой модуль, входящий в состав дистрибутива с одинаковым верхним namespace
-# Например, модуль Foo::Bar при котором есть либо дистрибутив Foo::Bar, либо этот модуль входит в состав
-# дистрибутива Foo
-# т.е. проверяется и модуль, и дистрибутив
 
 sub _is_cpan_published {
     my ($pkg, $severity) = @_;
@@ -142,13 +148,17 @@ sub _is_cpan_published {
 		return $success if $success;
 		
 		$success = eval {
-			$mcpan->module($pkg)->distribution; # e.g. Foo
+			$mcpan->module($pkg)->distribution;
 		};
 		
 		if ( $success ) {
+			# exceptions
 			return $success if ( $success eq 'Moo' );
 			return $success if ( $success eq 'Moose' );
-			return $success if ( $pkg =~ qr/$success/ );
+			
+			# $pkg can be Sub::Defer and $success is Sub-Quote
+			my $root_namespace = (split( '-', $success))[0];
+			return $success if ( $pkg =~ qr/$root_namespace/ );
 		}
 		
 		return 0;
@@ -186,7 +196,7 @@ sub _check_filter {
     return $res;
 }
 
-# return 1 if module calls must be leaved in stacktrace
+# return 1 if module must be leaved in stacktrace
 sub _leave_in_trace {
     my ( $module, $filters ) = @_;
 	
@@ -207,13 +217,9 @@ sub _filter_calls {
 	$traced_modules = [ uniq map { _extract_module_name($_) } @$subs ];
 
 	@$traced_modules = grep { $_ ne 'Devel::TRay' } @$traced_modules;
-	# warn "B : ".Dumper $traced_modules;
-	##### PROBLEM STRING IS NEXT
 	
 	my $filters = _get_enabled_module_filters();
-	warn Dumper "Enabled filters: ".Dumper $filters;
     @$traced_modules = grep { _leave_in_trace($_, $filters) } @$traced_modules;
-    warn "B : ".Dumper $traced_modules;
 	
 	my %modules_left = map { $_ => 1 } @$traced_modules;
     @$calls = grep { $modules_left{_extract_module_name($_->{'sub'})} } @$calls;
@@ -224,17 +230,13 @@ sub _filter_calls {
 sub _print {
     my ( $frame ) = @_;
     my $str = $indent x $frame->{'depth'} . $frame->{'sub'};
-    $str.= " (".$frame->{'line'}.")" if $frame->{'line'};
+    $str.= " (".$frame->{'line'}.")" if ( $frame->{'line'} && $Devel::TRay::show_lines );
     print STDERR "$str\n";
 }
 
 END {
-
-	# warn Dumper $calls;
 	_filter_calls($calls);
-	# warn Dumper $calls;
-    # _print($_) for @$calls;
-    warn "Traced modules: ".Dumper $traced_modules;
+    _print($_) for @$calls;
 }
 
 1;

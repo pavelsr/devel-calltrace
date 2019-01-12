@@ -11,16 +11,20 @@ subtest "Devel::TRay::_get_enabled_module_filters" => sub {
 
     # _get_enabled_module_filters must return only values which
     # 1) starts from _hide
-    # 2) are true
+    # 2) are true = 1 or some string value
 
     use_ok( 'Devel::TRay',
         'subs_matching=X:hide_core=1:hide_abc=1:hide_xyz=0' );
 
-    is_deeply( DB::_get_enabled_module_filters(),
-        [ 'hide_abc', 'hide_core' ], );
+    is_deeply(
+        DB::_get_enabled_module_filters(),
+        [ 'hide_abc', 'hide_core' ],
+        'Return abc sorted where val = 1 or some str'
+    );
 
     use_ok( 'Devel::TRay', 'xyz=1:abc=0:foo=bar' );
-    is_deeply( DB::_get_enabled_module_filters(), [] );
+    is_deeply( DB::_get_enabled_module_filters(),
+        [], 'Empty list when no filters used' );
 };
 
 subtest "DB::_extract_module_name" => sub {
@@ -61,24 +65,28 @@ subtest "DB::_is_eval" => sub {
 };
 
 subtest "DB::_check_filter" => sub {
-    ok DB::_check_filter( 'hide_core', $m->{core}[0] );
-    ok !DB::_check_filter( 'hide_core', $m->{other}[0] );
+    ok DB::_check_filter( 'hide_core', $m->{core}[0] ),
+      $m->{core}[0] . ' hide_core OK';
+    ok !DB::_check_filter( 'hide_core', $m->{other}[0] ),
+      $m->{core}[0] . ' hide_core NOT OK';
 
-    ok DB::_check_filter( 'hide_cpan', $m->{cpan}[0] );
-    ok !DB::_check_filter( 'hide_cpan', $m->{other}[0] );
+    ok DB::_check_filter( 'hide_cpan', $m->{cpan}[0] ),
+      $m->{core}[0] . ' hide_cpan OK';
+    ok !DB::_check_filter( 'hide_cpan', $m->{other}[0] ),
+      $m->{core}[0] . ' hide_cpan NOT OK';
 
-    ok DB::_check_filter( 'hide_eval', '(eval)' );
-    ok !DB::_check_filter( 'hide_eval', $m->{other}[0] );
+    ok DB::_check_filter( 'hide_eval', '(eval)' ), 'hide_eval OK';
+    ok !DB::_check_filter( 'hide_eval', $m->{other}[0] ),
+      $m->{other}[0] . ' hide_eval NOT OK';
 };
 
 subtest "DB::_leave_in_trace" => sub {
-
-    # test on default behaviour
     use_ok( 'Devel::TRay', 'hide_core=1:hide_cpan=1:hide_eval=1' );
-    ok !DB::_leave_in_trace( $m->{cpan}[3], DB::_get_enabled_module_filters() );
-    ok !DB::_leave_in_trace( $m->{core}[0], DB::_get_enabled_module_filters() );
-    ok !DB::_leave_in_trace( '(eval)',      DB::_get_enabled_module_filters() );
-    ok DB::_leave_in_trace( $m->{other}[0], DB::_get_enabled_module_filters() );
+    my $f = DB::_get_enabled_module_filters();
+    ok !DB::_leave_in_trace( $m->{cpan}[3], $f );
+    ok !DB::_leave_in_trace( $m->{core}[0], $f );
+    ok !DB::_leave_in_trace( '(eval)',      $f );
+    ok DB::_leave_in_trace( $m->{other}[0], $f );
 };
 
 subtest "DB::_filter_calls" => sub {
@@ -89,20 +97,21 @@ subtest "DB::_filter_calls" => sub {
         { 'sub' => 'main::foo',       'depth' => 1 }
     ];
     DB::_filter_calls($t);
-    # warn Dumper $t;
-    ok 1;
+    is_deeply $t, [ { 'sub' => 'main::foo', 'depth' => 1 } ],
+      'Filter is correct';
+    is_deeply $DB::traced_modules, ['main'], 'Traced list is ok';
 
-    # is_deeply( $t, )
+    # parent calls filters
+    # + trace folding
 };
 
 subtest "main" => sub {
-    my $options = 'hide_core=1:hide_cpan=1:hide_eval=1';
+    my $options = 'hide_core=1:hide_cpan=1:hide_eval=1:show_lines=0';
     my $stderr  = capture_stderr {
         system( 'perl -d:TRay=' . $options . ' t/test.pl' );
     };
-    # warn Dumper $stderr;
-    # is $stderr, "main::foo\nmain::bar"
-    ok 1;
+    is $stderr, "  main::foo\n    main::bar\n",
+      "Trace print is fine and default indent is two spaces";
 };
 
 done_testing();
