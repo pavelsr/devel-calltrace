@@ -107,6 +107,7 @@ sub _extract_module_name {
 # 2 - есть именно такой модуль, входящий в состав дистрибутива с одинаковым верхним namespace
 # Например, модуль Foo::Bar при котором есть либо дистрибутив Foo::Bar, либо этот модуль входит в состав
 # дистрибутива Foo
+# т.е. проверяется и модуль, и дистрибутив
 
 sub _is_cpan_published {
     my ($pkg, $severity) = @_;
@@ -123,7 +124,7 @@ sub _is_cpan_published {
 	
 	elsif ( $severity == 1 ) {
 	    my $expected_distro = $pkg;
-	    $expected_distro =~ s/::/-/;
+	    $expected_distro =~ s/::/-/g;
 		eval {
 			return $mcpan->distribution($expected_distro)->name;
 		} or do {
@@ -133,18 +134,22 @@ sub _is_cpan_published {
 	
 	elsif ( $severity == 2 ) {
 	    my $expected_distro = $pkg;
-	    $expected_distro =~ s/::/-/;
-		eval {
-			$mcpan->distribution($expected_distro);
-			return 1;
+	    $expected_distro =~ s/::/-/g;
+			
+		my $success = eval {
+			$mcpan->distribution($expected_distro)->name;
+		};
+		return $success if $success;
+		
+		$success = eval {
+			$mcpan->module($pkg)->distribution; # e.g. Foo
 		};
 		
-		$expected_distro = _extract_module_name($pkg); # e.g. Foo::Bar
-		my $real_distro;
-		eval {
-			$real_distro = $mcpan->module($expected_distro)->distribution; # e.g. Foo
-			return 1 if ( $expected_distro =~ qr/$real_distro/ );
-		};
+		if ( $success ) {
+			return $success if ( $success eq 'Moo' );
+			return $success if ( $success eq 'Moose' );
+			return $success if ( $pkg =~ qr/$success/ );
+		}
 		
 		return 0;
 	}
