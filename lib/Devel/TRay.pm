@@ -2,6 +2,14 @@
 
 Devel::TRay - See what your code's doing
 
+=head1 AUTHOR
+
+Pavel P. Serikov <pavelr@cpan.org>
+
+=head1 LICENCE
+
+Perl5
+
 =head1 SYNOPSIS
 
     #!/usr/bin/perl -d:TRay
@@ -36,8 +44,6 @@ You can use multiple filters with syntax like
 
 ( import options are separated with ':' symbol )
 
-=head1 AVAILABLE OPTIONS
-
 =cut
 
 package Devel::TRay;
@@ -46,7 +52,7 @@ use strict;
 no strict 'refs';
 
 use vars qw($SUBS_MATCHING);
-our $VERSION = '1.0';
+our $VERSION = '0.1';
 our $calls = [];
 our $ARGS;
 our $SUBS_MATCHING = qr/.*/;
