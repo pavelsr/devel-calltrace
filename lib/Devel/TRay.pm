@@ -52,7 +52,7 @@ use strict;
 no strict 'refs';
 
 use vars qw($SUBS_MATCHING);
-our $VERSION = '0.1';
+our $VERSION = '0.02';
 our $calls = [];
 our $ARGS;
 our $SUBS_MATCHING = qr/.*/;
